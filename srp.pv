@@ -1,0 +1,69 @@
+(************************************************)
+(*       Protocole Secure Remote Password       *)
+(************************************************)
+
+
+(* Type de données *)
+type client.
+type server.
+type sessionKey.
+
+(* Canal public *)
+free c:channel.
+
+free u:client.
+free s:server.
+
+(* Données publiques du canal *)
+(* Plusieurs possibilites :
+        - Dejo choisis (U, A)
+        - Choisis par le server après avoir reçu U (!(U, A))
+        - Modèle de la negociation ?
+*)
+free N:bitstring.
+free g:bitstring.
+
+(* Fonction *)
+fun Salt():bitstring.
+fun Verifier():bitstring.
+fun Password():bitstring.
+fun A(bitstring):bitstring.
+fun B(bitstring):bitstring.
+fun SClient():bitstring.
+fun SServer():bitstring.
+fun SHA():bitstring.
+fun SHA_Interleave():sessionKey.
+fun ProofClient():bitstring.
+fun ProofServer():bitstring.
+
+event reachClient.
+event reachServer.
+
+(* Processus Client *)
+let Pc(u1:client, s1:server) =
+    new a:bitstring;
+    out(c, (u1, A(a)));
+    in(c, (sel:bitstring, B1:bitstring)); (* Verifier B % N != 0 *)
+    let p = Password() in
+    let x = SHA() in
+    let Sc = SClient() in
+    let Kc = SHA_Interleave() in
+    let M1 = ProofClient() in
+    out(c, M1);
+    in(c, P2:bitstring);
+    if M1 = P2 then event reachClient else 0.
+
+(* Processus Serveur*)
+let Ps(s2:server) =
+    in(c, (u2:client, A1:bitstring)); (* Verifier A % N != 0 *)
+    new b:bitstring;
+    out(c, (Salt(), B(b)));
+    let Ss = SServer() in
+    let Ks = SHA_Interleave() in
+    let P1 = ProofServer() in
+    out(c, P1);
+    in(c, M2:bitstring);
+    if P1 = M2 then event reachServer else 0.
+
+(* Processus pricipal *)
+process Pc(u,s) | Ps(s)
