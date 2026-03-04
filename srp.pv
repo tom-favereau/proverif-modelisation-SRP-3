@@ -2,68 +2,63 @@
 (*       Protocole Secure Remote Password       *)
 (************************************************)
 
-
-(* Type de données *)
-type client.
-type server.
-type sessionKey.
-
 (* Canal public *)
 free c:channel.
 
-free u:client.
-free s:server.
+(* Fonctions arithmétiques *)
+fun exp_mod(bitstring,bitstring,bitstring):bitstring. (*x,y,z: x^y%z*)
+fun add_mod(bitstring,bitstring,bitstring):bitstring. (*x,y,z: x+y%z*)
+fun sub_mod(bitstring,bitstring,bitstring):bitstring. (*x,y,z: x-y%z*)
+fun mult_mod(bitstring,bitstring,bitstring):bitstring. (*x,y,z: x*y%z*)
+fun XOR(bitstring,bitstring):bitstring. (*x,y: x XOR y*)
 
-(* Données publiques du canal *)
-(* Plusieurs possibilites :
-        - Dejo choisis (U, A)
-        - Choisis par le server après avoir reçu U (!(U, A))
-        - Modèle de la negociation ?
-*)
-free N:bitstring.
-free g:bitstring.
+(* Autres fonctions*)
+fun Password():bitstring [private]. (* mot de passe de l'utilisateur*)
+fun concat(bitstring,bitstring):bitstring. (*x,y : x | y*)
+fun first32(bitstring):bitstring. (*x: x[:32]*)
+fun SHA(bitstring):bitstring. (*fonction de hash SHA*)
+fun SHA_Interleave(bitstring):bitstring. (*fonction de SHA_Interleave*)
+fun H(bitstring):bitstring. (*fonction de hash quelconque*)
 
-(* Fonction *)
-fun Salt():bitstring.
-fun Verifier():bitstring.
-fun Password():bitstring.
-fun A(bitstring):bitstring.
-fun B(bitstring):bitstring.
-fun SClient():bitstring.
-fun SServer():bitstring.
-fun SHA():bitstring.
-fun SHA_Interleave():sessionKey.
-fun ProofClient():bitstring.
-fun ProofServer():bitstring.
+fun Verifier():bitstring. (* A MODIF dans le future*)
 
-event reachClient.
+(*
+event reachClient. 
 event reachServer.
+*)
 
 (* Processus Client *)
-let Pc(u1:client, s1:server) =
+let Pc(cl:bitstring) =
+    out(c, cl);
+    in(c,x1:bitstring);
+    let (g:bitstring,N:bitstring,salt:bitstring) = x1 in
     new a:bitstring;
-    out(c, (u1, A(a)));
-    in(c, (sel:bitstring, B1:bitstring)); (* Verifier B % N != 0 *)
+    let A = exp_mod(g,a,N) in
+    out(c,A);
+    in(c, B:bitstring); (* TODO: Verifier B % N != 0 *)
     let p = Password() in
-    let x = SHA() in
-    let Sc = SClient() in
-    let Kc = SHA_Interleave() in
-    let M1 = ProofClient() in
-    out(c, M1);
-    in(c, P2:bitstring);
-    if M1 = P2 then event reachClient else 0.
+    let x= SHA(concat(salt,SHA(concat(cl,p)))) in
+    let S = exp_mod(sub_mod(B, exp_mod(g,x,N),N),add_mod(a,mult_mod(first32(SHA(B)),x,N),N),N) in
+    let K = SHA_Interleave(S) in
+    let M = H(concat(XOR(H(N),H(g)),concat(H(cl),concat(salt,concat(A,concat(B,K)))))) in
+    out(c, M).
 
 (* Processus Serveur*)
-let Ps(s2:server) =
-    in(c, (u2:client, A1:bitstring)); (* Verifier A % N != 0 *)
+let Ps() =
+    in(c,cl:bitstring);
+    new g:bitstring;
+    new N:bitstring;
+    new salt:bitstring; 
+    out(c,(g,N,salt));
+    in(c, A:bitstring); (* TODO : Verifier A % N != 0 *)
     new b:bitstring;
-    out(c, (Salt(), B(b)));
-    let Ss = SServer() in
-    let Ks = SHA_Interleave() in
-    let P1 = ProofServer() in
-    out(c, P1);
-    in(c, M2:bitstring);
-    if P1 = M2 then event reachServer else 0.
+    let v = Verifier() in (* TODO : trouver un moyen de calculer le v. Reduc ?*)
+    let B = add_mod(v,exp_mod(g,b,N),N) in (* (v % N + g^b %N)% N = (v + g^b)% N*)
+    out(c, B);
+    let S = exp_mod(mult_mod(A,exp_mod(v,first32(SHA(B)),N),N),b,N) in 
+    let K = SHA_Interleave(S) in
+    in(c,M:bitstring); (* TODO : Vérifier M*)
+    out(c,H(concat(A,concat(M,K)))).
 
 (* Processus pricipal *)
-process Pc(u,s) | Ps(s)
+process !(in(c,cl:bitstring);Pc(cl)) | !Ps() (* Ajouter le compromised*)
