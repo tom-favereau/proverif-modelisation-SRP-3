@@ -2,63 +2,111 @@
 (*       Protocole Secure Remote Password       *)
 (************************************************)
 
+(* Types *)
+type id.
+type key.
+
 (* Canal public *)
 free c:channel.
 
-(* Fonctions arithmétiques *)
-fun exp_mod(bitstring,bitstring,bitstring):bitstring. (*x,y,z: x^y%z*)
-fun add_mod(bitstring,bitstring,bitstring):bitstring. (*x,y,z: x+y%z*)
-fun sub_mod(bitstring,bitstring,bitstring):bitstring. (*x,y,z: x-y%z*)
-fun mult_mod(bitstring,bitstring,bitstring):bitstring. (*x,y,z: x*y%z*)
-fun XOR(bitstring,bitstring):bitstring. (*x,y: x XOR y*)
+(* Variables publiques *)
+free g:bitstring.
+free N:bitstring.
 
-(* Autres fonctions*)
-fun Password():bitstring [private]. (* mot de passe de l'utilisateur*)
-fun concat(bitstring,bitstring):bitstring. (*x,y : x | y*)
-fun first32(bitstring):bitstring. (*x: x[:32]*)
-fun SHA(bitstring):bitstring. (*fonction de hash SHA*)
-fun SHA_Interleave(bitstring):bitstring. (*fonction de SHA_Interleave*)
-fun H(bitstring):bitstring. (*fonction de hash quelconque*)
+fun get_password_verifier(id):bitstring [private]. (* Récupérer le password_verifier de "id" de la BDD du host *)
+fun get_salt(id):bitstring [private]. (* Récupérer le salt de "id" de la BDD du host *)
 
-fun Verifier():bitstring. (* A MODIF dans le future*)
+fun pk_client(key):key. (* Clé publique du client (A) *)
+fun pk_host(key,bitstring):key. (* Clé publique du host (B) *)
 
-(*
-event reachClient. 
-event reachServer.
-*)
+fun get_password(id):bitstring [private]. (* Mot de passe de l'utilisateur*)
+
+fun shared_key_client(key,bitstring,key,bitstring):key. (* Clé de session calculée par le client *)
+fun shared_key_host(key,bitstring,bitstring,key):key. (* Clé de session calculée par le host *)
+
+fun get_x(bitstring,id,bitstring):bitstring. (* Calculer la valeur de x *)
+fun get_u(key):bitstring. (* Calculer la valeur de u *)
+
+(*fun get_v(bitstring,id,bitstring):bitstring.*)
+
+fun client_proof(id,bitstring,key,key,key):bitstring. (* Calcul du message de preuve envoyé du client vers le host *)
+fun host_proof(key,bitstring,key):bitstring. (* Calcul du message de preuve envoyé du host vers le client *)
+
+(* Equations *)
+
+(*equation forall cl:id; let (v,s) = get_info(cl) in v = get_v(s,cl,get_password(cl)). *)
+
+(* Egalité entre les deux clés de session *)
+equation forall cl:id, a:key, b:key; 
+let v = get_password_verifier(cl) in 
+let s = get_salt(cl) in 
+let A = pk_client(a) in 
+let B = pk_host(b,v) in 
+let x = get_x(s,cl,get_password(cl)) in 
+let u = get_u(B) in 
+shared_key_client(B,x,a,u) = shared_key_host(A,v,u,b).
+
+(* Events *)
+event startClient(id). (* Début de l'authentification Client *)
+event sessionWithHost(id). (* Session établi avec le Host *)
+
+event startHost(id). (* Début de l'authentification Host *)
+event sessionWithClient(id). (* Session établi avec le Client *)
+
+(* Queries *)
+
+(* Authentification des parties *)
+query cl:id; inj-event(sessionWithHost(cl)) ==> inj-event(startClient(cl)).
+query cl:id; inj-event(sessionWithClient(cl)) ==> inj-event(startHost(cl)). 
+
+(* Authentification mutuelle *)
+(* TODO : VERIFIER POURQUOI C'EST FAUX*)
+query cl:id; inj-event(sessionWithClient(cl)) ==> inj-event(sessionWithHost(cl)).
+query cl:id; inj-event(sessionWithHost(cl)) ==> inj-event(sessionWithClient(cl)).
+
+(* TODO : Faire la query pour verifier que K n'a pas été leak *)
+(* TODO : Faire les compromised : compromised le mdp ? La BDD du host ?, les clés privées ?*)
 
 (* Processus Client *)
-let Pc(cl:bitstring) =
-    out(c, cl);
-    in(c,x1:bitstring);
-    let (g:bitstring,N:bitstring,salt:bitstring) = x1 in
-    new a:bitstring;
-    let A = exp_mod(g,a,N) in
-    out(c,A);
-    in(c, B:bitstring); (* TODO: Verifier B % N != 0 *)
-    let p = Password() in
-    let x= SHA(concat(salt,SHA(concat(cl,p)))) in
-    let S = exp_mod(sub_mod(B, exp_mod(g,x,N),N),add_mod(a,mult_mod(first32(SHA(B)),x,N),N),N) in
-    let K = SHA_Interleave(S) in
-    let M = H(concat(XOR(H(N),H(g)),concat(H(cl),concat(salt,concat(A,concat(B,K)))))) in
-    out(c, M).
+let Pc(cl:id) =
+    event startClient(cl);
+    new a:key;
+    let A = pk_client(a) in
+    out(c,(cl,A));
+    in(c, x1:bitstring); 
+    let (s:bitstring,B:key) = x1 in
+    let p = get_password(cl) in
+    let x = get_x(s,cl,p) in
+    let u = get_u(B) in
+    let K = shared_key_client(B,x,a,u) in
+    let M = client_proof(cl,s,A,B,K) in
+    out(c,M);
+    in(c,=host_proof(A,M,K));
+    event sessionWithHost(cl).
 
-(* Processus Serveur*)
-let Ps() =
-    in(c,cl:bitstring);
-    new g:bitstring;
-    new N:bitstring;
-    new salt:bitstring; 
-    out(c,(g,N,salt));
-    in(c, A:bitstring); (* TODO : Verifier A % N != 0 *)
-    new b:bitstring;
-    let v = Verifier() in (* TODO : trouver un moyen de calculer le v. Reduc ?*)
-    let B = add_mod(v,exp_mod(g,b,N),N) in (* (v % N + g^b %N)% N = (v + g^b)% N*)
-    out(c, B);
-    let S = exp_mod(mult_mod(A,exp_mod(v,first32(SHA(B)),N),N),b,N) in 
-    let K = SHA_Interleave(S) in
-    in(c,M:bitstring); (* TODO : Vérifier M*)
-    out(c,H(concat(A,concat(M,K)))).
+    (*
+    if M_host = host_proof(A,M,K) then
+        event sessionWithHost(cl);
+    else 0.*)
+
+(* Processus Host*)
+let Ph() =
+    in(c,x1:bitstring);
+    let (cl:id,A:key) = x1 in
+    event startHost(cl);
+    let v = get_password_verifier(cl) in
+    let s = get_salt(cl) in
+    new b:key;
+    let B = pk_host(b,v) in
+    out(c,(s,B));
+    let u = get_u(B) in
+    let K = shared_key_host(A,v,u,b) in 
+    in(c,M_client:bitstring);
+    if M_client =  client_proof(cl,s,A,B,K) then
+        let M = host_proof(A,M_client,K) in
+        out(c,M);
+        event sessionWithClient(cl)
+    else 0.
 
 (* Processus pricipal *)
-process !(in(c,cl:bitstring);Pc(cl)) | !Ps() (* Ajouter le compromised*)
+process !(in(c,cl:id);Pc(cl)) | !Ph() (* Ajouter le compromised*)
