@@ -53,8 +53,10 @@ event sessionWithHost(id). (* Session établi avec le Host *)
 event startHost(id). (* Début de l'authentification Host *)
 event sessionWithClient(id). (* Session établi avec le Client *)
 
-(* Queries *)
+event secretKClient(key). (* Cle de sessions cote Client *)
+event secretKHost(key). (* Cle de session cote Host *)
 
+(* Queries *)
 (* Authentification des parties *)
 query cl:id; inj-event(sessionWithHost(cl)) ==> inj-event(startClient(cl)).
 query cl:id; inj-event(sessionWithClient(cl)) ==> inj-event(startHost(cl)). 
@@ -64,7 +66,15 @@ query cl:id; inj-event(sessionWithClient(cl)) ==> inj-event(startHost(cl)).
 query cl:id; inj-event(sessionWithClient(cl)) ==> inj-event(sessionWithHost(cl)).
 query cl:id; inj-event(sessionWithHost(cl)) ==> inj-event(sessionWithClient(cl)).
 
+(* Secret des cles de session *)
 (* TODO : Faire la query pour verifier que K n'a pas été leak *)
+query k:key; event(secretKClient(k)) && attacker(k).
+query k:key; event(secretKHost(k)) && attacker(k).
+(*
+query k:key; event(secretKClient(k)) ==> attacker(k). Cannot be proved
+query k:key; event(secretKHost(k)) ==> attacker(k).  Cannot be proved
+*)
+
 (* TODO : Faire les compromised : compromised le mdp ? La BDD du host ?, les clés privées ?*)
 
 (* Processus Client *)
@@ -79,6 +89,7 @@ let Pc(cl:id) =
     let x = get_x(s,cl,p) in
     let u = get_u(B) in
     let K = shared_key_client(B,x,a,u) in
+    event secretKClient(K);
     let M = client_proof(cl,s,A,B,K) in
     out(c,M);
     in(c,=host_proof(A,M,K));
@@ -101,6 +112,7 @@ let Ph() =
     out(c,(s,B));
     let u = get_u(B) in
     let K = shared_key_host(A,v,u,b) in 
+    event secretKHost(K);
     in(c,M_client:bitstring);
     if M_client =  client_proof(cl,s,A,B,K) then
         let M = host_proof(A,M_client,K) in
@@ -109,4 +121,4 @@ let Ph() =
     else 0.
 
 (* Processus pricipal *)
-process !(in(c,cl:id);Pc(cl)) | !Ph() (* Ajouter le compromised*)
+process !(in(c,cl:id);Pc(cl)) | !Ph() (* Ajouter le compromised *)
