@@ -47,39 +47,40 @@ let u = get_u(B) in
 shared_key_client(B,x,a,u) = shared_key_host(A,v,u,b).
 
 (* Events *)
-event startClient(id). (* Début de l'authentification Client *)
-event sessionWithHost(id). (* Session établi avec le Host *)
+event startClient(id,key,key,key). (* Début de l'authentification Client *)
+event endClient(id,key,key,key). (* Session établi avec le Host *)
 
-event startHost(id). (* Début de l'authentification Host *)
-event sessionWithClient(id). (* Session établi avec le Client *)
+event startHost(id,key,key,key). (* Début de l'authentification Host *)
+event endHost(id,key,key,key). (* Session établi avec le Client *)
 
+event secretShared(id,key). (* Secret de la clé entre le client et le host*)
+(* [A SUPPRIMER ?]
 event secretKClient(key). (* Cle de sessions cote Client *)
 event secretKHost(key). (* Cle de session cote Host *)
+*)
 
 (* Queries *)
 (* Authentification des parties *)
-query cl:id; inj-event(sessionWithHost(cl)) ==> inj-event(startClient(cl)).
-query cl:id; inj-event(sessionWithClient(cl)) ==> inj-event(startHost(cl)). 
+query cl:id, A:key, B:key, K:key; inj-event(endHost(cl,A,B,K)) ==> inj-event(startClient(cl,A,B,K)).
+query cl:id, A:key, B:key, K:key;  inj-event(endClient(cl,A,B,K)) ==> inj-event(startHost(cl,A,B,K)). 
 
-(* Authentification mutuelle *)
-(* TODO : VERIFIER POURQUOI C'EST FAUX*)
-query cl:id; inj-event(sessionWithClient(cl)) ==> inj-event(sessionWithHost(cl)).
-query cl:id; inj-event(sessionWithHost(cl)) ==> inj-event(sessionWithClient(cl)).
 
-(* Secret des cles de session *)
-(* TODO : Faire la query pour verifier que K n'a pas été leak *)
+(* Secret des cles de session [A SUPPRIMER?]*)
+(* TODO : Faire la query pour verifier que K n'a pas été leak 
 query k:key; event(secretKClient(k)) && attacker(k).
 query k:key; event(secretKHost(k)) && attacker(k).
-(*
 query k:key; event(secretKClient(k)) ==> attacker(k). Cannot be proved
 query k:key; event(secretKHost(k)) ==> attacker(k).  Cannot be proved
 *)
+
+
+(* Secret des cles de session *)
+(* query cl:id, k:key; event(secret(cl,K) & attacker(k) ==> client_compromised(cl) || host_compromised()). *) (* TODO: client_compromised(cl) et host_compromised()*)
 
 (* TODO : Faire les compromised : compromised le mdp ? La BDD du host ?, les clés privées ?*)
 
 (* Processus Client *)
 let Pc(cl:id) =
-    event startClient(cl);
     new a:key;
     let A = pk_client(a) in
     out(c,(cl,A));
@@ -89,11 +90,12 @@ let Pc(cl:id) =
     let x = get_x(s,cl,p) in
     let u = get_u(B) in
     let K = shared_key_client(B,x,a,u) in
-    event secretKClient(K);
+    (*event secretKClient(K); [A SUPPRIMER?]*)
     let M = client_proof(cl,s,A,B,K) in
+    event startClient(cl,A,B,K); (* Le Client s'engage dans la session avec le Host*)
     out(c,M);
     in(c,=host_proof(A,M,K));
-    event sessionWithHost(cl).
+    event endClient(cl,A,B,K). (* Le Client a fini d'authentifier le Host*)
 
     (*
     if M_host = host_proof(A,M,K) then
@@ -104,7 +106,6 @@ let Pc(cl:id) =
 let Ph() =
     in(c,x1:bitstring);
     let (cl:id,A:key) = x1 in
-    event startHost(cl);
     let v = get_password_verifier(cl) in
     let s = get_salt(cl) in
     new b:key;
@@ -112,13 +113,14 @@ let Ph() =
     out(c,(s,B));
     let u = get_u(B) in
     let K = shared_key_host(A,v,u,b) in 
-    event secretKHost(K);
+    event secretShared(cl,K); (* Clé connu par les 2. Doit être mis aussi/ou exclusif de l'autre côté ? Faire commen avant ?*)
+    (*event secretKHost(K); [A SUPPRIMER?]*)
     in(c,M_client:bitstring);
     if M_client =  client_proof(cl,s,A,B,K) then
+        event endHost(cl,A,B,K); (* Le Host a fini d'authentifier le Client*)
         let M = host_proof(A,M_client,K) in
-        out(c,M);
-        event sessionWithClient(cl)
-    else 0.
+        event startHost(cl,A,B,K); (* Le Host s'engage dans la session avec le Client*)
+        out(c,M).
 
 (* Processus pricipal *)
 process !(in(c,cl:id);Pc(cl)) | !Ph() (* Ajouter le compromised *)
