@@ -22,23 +22,23 @@ fun get_salt(id):bitstring [private].
 (* Compute the client's DH public key (A) *)
 fun dh_client(key):key.
 (* Compute the host's DH public key (B) *)
-fun dh_host(key,bitstring):key.
+fun dh_host(key, bitstring):key.
 
 (* Retrieve the user's password *)
 fun get_password(id):bitstring [private].
 
 (* Compute the session key on the client side *)
-fun shared_key_client(key,bitstring,key,bitstring):key.
+fun shared_key_client(key, bitstring, key, bitstring):key.
 (* Compute the session key on the host side *)
-fun shared_key_host(key,bitstring,bitstring,key):key.
+fun shared_key_host(key, bitstring, bitstring, key):key.
 
-fun get_x(bitstring,id,bitstring):bitstring. (* Compute the value x *)
+fun get_x(bitstring, id, bitstring):bitstring. (* Compute the value x *)
 fun get_u(key):bitstring. (* Compute the value u *)
 
 (* Generate the client's proof to be send to the host *)
-fun client_proof(id,bitstring,key,key,key):bitstring.
+fun client_proof(id, bitstring, key, key, key):bitstring.
 (* Generate the host's proof to be send to the client *)
-fun host_proof(key,bitstring,key):bitstring.
+fun host_proof(key, bitstring, key):bitstring.
 
 
 (* Equations *)
@@ -47,88 +47,88 @@ equation forall cl:id, a:key, b:key;
 let v = get_password_verifier(cl) in 
 let s = get_salt(cl) in 
 let A = dh_client(a) in 
-let B = dh_host(b,v) in 
-let x = get_x(s,cl,get_password(cl)) in 
+let B = dh_host(b, v) in
+let x = get_x(s, cl, get_password(cl)) in
 let u = get_u(B) in 
-shared_key_client(B,x,a,u) = shared_key_host(A,v,u,b).
+shared_key_client(B, x, a, u) = shared_key_host(A, v, u, b).
 
 (* Events *)
 event password_compromised(id). (* Client's password has leaked *)
 event bdd_entry_compromised(id). (* Client's entry in the host database has leaked *)
 
-event startClient(id,key,key,key). (* Start of client authentication *)
-event endClient(id,key,key,key). (* Session with host established *)
+event start_client(id, key, key, key). (* Start of client authentication *)
+event end_client(id, key, key, key). (* Session with host established *)
 
-event startHost(id,key,key,key). (* Start of host authentication *)
-event endHost(id,key,key,key). (* Session with client established *)
+event start_host(id, key, key, key). (* Start of host authentication *)
+event end_host(id, key, key, key). (* Session with client established *)
 
 (* Queries *)
 
 (* If the host finishes authentication, the client must have started
    authentication, unless credentials were compromised:
    either through the password or from the database associated entry *)
-query cl:id, A:key, B:key, K:key; inj-event(endHost(cl,A,B,K)) ==> inj-event(startClient(cl,A,B,K)) || event(password_compromised(cl)) || event(bdd_entry_compromised(cl)).
+query cl:id, A:key, B:key, K:key; inj-event(end_host(cl, A, B, K)) ==> inj-event(start_client(cl, A, B, K)) || event(password_compromised(cl)) || event(bdd_entry_compromised(cl)).
 
 (* If the client finishes authentication, the host must have started
    authentication, unless credentials were compromised:
    either through the password or from the database associated entry *)
-query cl:id, A:key, B:key, K:key;  inj-event(endClient(cl,A,B,K)) ==> inj-event(startHost(cl,A,B,K)) || event(password_compromised(cl)) || event(bdd_entry_compromised(cl)).
+query cl:id, A:key, B:key, K:key;  inj-event(end_client(cl, A, B, K)) ==> inj-event(start_host(cl, A, B, K)) || event(password_compromised(cl)) || event(bdd_entry_compromised(cl)).
 
 (* If both the client and the host finish authentication but the session key is
    known to an attacker, credentials must have been compromised *)
-query cl:id, A:key, B:key, K:key; event(endHost(cl,A,B,K)) && event(endClient(cl,A,B,K)) && attacker(K) ==> event(password_compromised(cl)) || event(bdd_entry_compromised(cl)).
+query cl:id, A:key, B:key, K:key; event(end_host(cl, A, B, K)) && event(end_client(cl, A, B, K)) && attacker(K) ==> event(password_compromised(cl)) || event(bdd_entry_compromised(cl)).
 
 (* Client process : Handles the client-side authentication steps *)
 let Pc(cl:id) =
     new a:key;
     let A = dh_client(a) in
-    out(c,(cl,A));
+    out(c, (cl, A));
     (* Receiving salt and host's public key *)
     in(c, x1:bitstring); 
-    let (s:bitstring,B:key) = x1 in
+    let (s:bitstring, B:key) = x1 in
     (* Computing of the session key and the proof *)
     let p = get_password(cl) in
-    let x = get_x(s,cl,p) in
+    let x = get_x(s, cl, p) in
     let u = get_u(B) in
-    let K = shared_key_client(B,x,a,u) in
-    let M = client_proof(cl,s,A,B,K) in
-    event startClient(cl,A,B,K); (* The client engages in the session with the host *)
-    out(c,M);
-    in(c,=host_proof(A,M,K));
-    event endClient(cl,A,B,K). (* The client has finished authenticating the host *)
+    let K = shared_key_client(B, x, a, u) in
+    let M = client_proof(cl, s, A, B, K) in
+    event start_client(cl, A, B, K); (* The client engages in the session with the host *)
+    out(c, M);
+    in(c, =host_proof(A, M, K));
+    event end_client(cl, A, B, K). (* The client has finished authenticating the host *)
 
 
 (* Host process : Handles the host-side authentication steps *)
 let Ph() =
-    in(c,x1:bitstring);
-    let (cl:id,A:key) = x1 in
+    in(c, x1:bitstring);
+    let (cl:id, A:key) = x1 in
     let v = get_password_verifier(cl) in
     let s = get_salt(cl) in
     new b:key;
-    let B = dh_host(b,v) in
-    out(c,(s,B));
+    let B = dh_host(b, v) in
+    out(c, (s, B));
     let u = get_u(B) in
     (* Computing of the session key and the proof *)
-    let K = shared_key_host(A,v,u,b) in 
-    in(c,M_client:bitstring);
-    if M_client =  client_proof(cl,s,A,B,K) then
-        event endHost(cl,A,B,K); (* The host has finished authenticating the client *)
-        let M = host_proof(A,M_client,K) in
-        event startHost(cl,A,B,K); (* The host engages in the session with the client *)
-        out(c,M).
+    let K = shared_key_host(A, v, u, b) in
+    in(c, M_client:bitstring);
+    if M_client =  client_proof(cl, s, A, B, K) then
+        event end_host(cl, A, B, K); (* The host has finished authenticating the client *)
+        let M = host_proof(A, M_client, K) in
+        event start_host(cl, A, B, K); (* The host engages in the session with the client *)
+        out(c, M).
 
 (* Simulates a password leak *)
 let compromise_password(cl:id) =
     event password_compromised(cl);
-    out(c,get_password(cl)).
+    out(c, get_password(cl)).
 
 (* Simulates a database entry leak *)
 let compromise_bdd_entry(cl:id)=
     event bdd_entry_compromised(cl);
-    out(c,get_password_verifier(cl));
-    out(c,get_salt(cl)).
+    out(c, get_password_verifier(cl));
+    out(c, get_salt(cl)).
 
 (* Main process : Run client and host processes with compromise simulations *)
-process !(in(c,cl:id);Pc(cl)) | !Ph() 
-        | !(in(c,cl:id);compromise_password(cl))
-        | !(in(c,cl:id);compromise_bdd_entry(cl))
+process !(in(c, cl:id);Pc(cl)) | !Ph()
+        | !(in(c, cl:id);compromise_password(cl))
+        | !(in(c, cl:id);compromise_bdd_entry(cl))
