@@ -49,7 +49,7 @@ shared_key_client(B, s, cl, get_password(cl), a) = shared_key_host(A, v, b).
 
 (* --- Events --- *)
 event password_compromised(id). (* Client's password has leaked *)
-event bdd_entry_compromised(id). (* Client's entry in the host database has leaked *)
+event db_entry_compromised(id). (* Client's entry in the host database has leaked *)
 
 event start_client(id, key, key, key). (* Start of client authentication *)
 event end_client(id, key, key, key). (* Session with host established *)
@@ -61,20 +61,35 @@ event end_host(id, key, key, key). (* Session with client established *)
 (* If the host finishes authentication, the client must have started
    authentication, unless credentials were compromised:
    either through the password or from the database associated entry *)
-query cl:id, A:key, B:key, K1:key, K2:key; inj-event(end_host(cl, A, B, K1)) ==> inj-event(start_client(cl, A, B, K2)) || event(password_compromised(cl)) || event(bdd_entry_compromised(cl)).
+(* Expected property *)
+query cl:id, A:key, B:key, K1:key, K2:key; inj-event(end_host(cl, A, B, K1)) ==> inj-event(start_client(cl, A, B, K2)) || event(password_compromised(cl)) || event(db_entry_compromised(cl)).
+(* Verify if property is ensured when password has leaked *)
+query cl:id, A:key, B:key, K1:key, K2:key; inj-event(end_host(cl, A, B, K1)) && event(password_compromised(cl))  ==> inj-event(start_client(cl, A, B, K2)) || event(db_entry_compromised(cl)).
+(* Verify if property is ensured when DB entry has leaked *)
+query cl:id, A:key, B:key, K1:key, K2:key; inj-event(end_host(cl, A, B, K1)) && event(db_entry_compromised(cl)) ==> inj-event(start_client(cl, A, B, K2)) || event(password_compromised(cl)).
 
 (* If the client finishes authentication, the host must have started
    authentication, unless credentials were compromised:
    either through the password or from the database associated entry *)
-query cl:id, A:key, B:key, K1:key, K2:key;  inj-event(end_client(cl, A, B, K1)) ==> inj-event(start_host(cl, A, B, K2)) || event(password_compromised(cl)) || event(bdd_entry_compromised(cl)).
+(* Expected property *)
+query cl:id, A:key, B:key, K1:key, K2:key;  inj-event(end_client(cl, A, B, K1)) ==> inj-event(start_host(cl, A, B, K2)) || event(password_compromised(cl)) || event(db_entry_compromised(cl)).
+(* Verify if property is ensured when password has leaked *)
+query cl:id, A:key, B:key, K1:key, K2:key;  inj-event(end_client(cl, A, B, K1)) && event(password_compromised(cl)) ==> inj-event(start_host(cl, A, B, K2)) || event(db_entry_compromised(cl)).
+(* Verify if property is ensured when DB entry has leaked *)
+query cl:id, A:key, B:key, K1:key, K2:key;  inj-event(end_client(cl, A, B, K1)) && event(db_entry_compromised(cl)) ==> inj-event(start_host(cl, A, B, K2)) || event(password_compromised(cl)).
 
 (* If both the client and the host finish authentication, the session key should be the same *)
 query cl:id, A:key, B:key, K1:key, K2:key; event(end_host(cl,A,B,K1)) && event(end_host(cl,A,B,K1)) ==> K1 = K2.
 
 (* If both the client and the host finish authentication but the session key is
    known to an attacker, credentials must have been compromised *)
-query cl:id, A:key, B:key, K1:key, K2:key; event(end_host(cl, A, B, K1)) && event(end_client(cl, A, B, K2)) && attacker(K1) ==> event(password_compromised(cl)) || event(bdd_entry_compromised(cl)).
-query cl:id, A:key, B:key, K1:key, K2:key; event(end_host(cl, A, B, K1)) && event(end_client(cl, A, B, K2)) && attacker(K2) ==> event(password_compromised(cl)) || event(bdd_entry_compromised(cl)).
+(* Expected property *)
+query cl:id, A:key, B:key, K1:key, K2:key; event(end_host(cl, A, B, K1)) && event(end_client(cl, A, B, K2)) && attacker(K1) ==> event(password_compromised(cl)) || event(db_entry_compromised(cl)).
+query cl:id, A:key, B:key, K1:key, K2:key; event(end_host(cl, A, B, K1)) && event(end_client(cl, A, B, K2)) && attacker(K2) ==> event(password_compromised(cl)) || event(db_entry_compromised(cl)).
+(* Stronger property: If both the client and the host finish authentication then 
+   session key is unknown by the attacker even if credentials have been compromised *)
+query cl:id, A:key, B:key, K1:key, K2:key; event(end_host(cl, A, B, K1)) && event(end_client(cl, A, B, K2)) && attacker(K1) ==> false. 
+query cl:id, A:key, B:key, K1:key, K2:key; event(end_host(cl, A, B, K1)) && event(end_client(cl, A, B, K2)) && attacker(K2) ==> false. 
 
 (* Client process : Handles the client-side authentication steps *)
 let Pc(cl:id) =
@@ -120,7 +135,7 @@ let compromise_password(cl:id) =
 
 (* Simulates a database entry leak *)
 let compromise_bdd_entry(cl:id)=
-    event bdd_entry_compromised(cl);
+    event db_entry_compromised(cl);
     out(c_attack, get_password_verifier(cl));
     out(c_attack, get_salt(cl)). (* Useless because the host sends the salt in plain text over the channel, but kept 
                                     because the salt is part of the entry and we want to simulate a leaked entry *)
