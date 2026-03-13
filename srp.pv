@@ -28,12 +28,11 @@ fun dh_host(key, bitstring):key.
 fun get_password(id):bitstring [private].
 
 (* Compute the session key on the client side *)
-fun shared_key_client(key, bitstring, key, bitstring):key.
+fun shared_key_client(key, bitstring, key):key.
 (* Compute the session key on the host side *)
-fun shared_key_host(key, bitstring, bitstring, key):key.
+fun shared_key_host(key, bitstring, key):key.
 
 fun get_x(bitstring, id, bitstring):bitstring. (* Compute the value x *)
-fun get_u(key):bitstring. (* Compute the value u *)
 
 (* Generate the client's proof to be send to the host *)
 fun client_proof(id, bitstring, key, key, key):bitstring.
@@ -49,8 +48,7 @@ let s = get_salt(cl) in
 let A = dh_client(a) in 
 let B = dh_host(b, v) in
 let x = get_x(s, cl, get_password(cl)) in
-let u = get_u(B) in 
-shared_key_client(B, x, a, u) = shared_key_host(A, v, u, b).
+shared_key_client(B, x, a) = shared_key_host(A, v, b).
 
 (* Events *)
 event password_compromised(id). (* Client's password has leaked *)
@@ -63,7 +61,6 @@ event start_host(id, key, key, key). (* Start of host authentication *)
 event end_host(id, key, key, key). (* Session with client established *)
 
 (* Queries *)
-
 (* If the host finishes authentication, the client must have started
    authentication, unless credentials were compromised:
    either through the password or from the database associated entry *)
@@ -89,14 +86,12 @@ let Pc(cl:id) =
     (* Computing of the session key and the proof *)
     let p = get_password(cl) in
     let x = get_x(s, cl, p) in
-    let u = get_u(B) in
-    let K = shared_key_client(B, x, a, u) in
+    let K = shared_key_client(B, x, a) in
     let M = client_proof(cl, s, A, B, K) in
     event start_client(cl, A, B, K); (* The client engages in the session with the host *)
     out(c, M);
     in(c, =host_proof(A, M, K));
     event end_client(cl, A, B, K). (* The client has finished authenticating the host *)
-
 
 (* Host process : Handles the host-side authentication steps *)
 let Ph() =
@@ -107,9 +102,8 @@ let Ph() =
     new b:key;
     let B = dh_host(b, v) in
     out(c, (s, B));
-    let u = get_u(B) in
     (* Computing of the session key and the proof *)
-    let K = shared_key_host(A, v, u, b) in
+    let K = shared_key_host(A, v, b) in
     in(c, M_client:bitstring);
     if M_client =  client_proof(cl, s, A, B, K) then
         event end_host(cl, A, B, K); (* The host has finished authenticating the client *)
